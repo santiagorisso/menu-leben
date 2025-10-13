@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { signOut } from "firebase/auth" // Import handleSignOut
+import { signOut } from "firebase/auth"
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
@@ -14,7 +14,13 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import type { MenuCategory } from "@/types/menu"
-import { subscribeToMenuItems, addMenuItem, updateMenuItem, deleteMenuItem } from "@/lib/firestore"
+import {
+  subscribeToAllCollections,
+  addMenuItemToCollection,
+  updateMenuItemInCollection,
+  deleteMenuItemFromCollection,
+  getCollectionName,
+} from "@/lib/firestore"
 
 const MENU_CATEGORIES: MenuCategory[] = [
   "Para Picar",
@@ -32,7 +38,7 @@ export default function AdminPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [menuItems, setMenuItems] = useState<any[]>([])
+  const [menuItems, setMenuItems] = useState<Record<string, any[]>>({})
   const [isAddingItem, setIsAddingItem] = useState(false)
   const [editingItem, setEditingItem] = useState<any>(null)
 
@@ -45,7 +51,7 @@ export default function AdminPage() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUser(currentUser)
-        const unsubscribeItems = subscribeToMenuItems(db, (items) => {
+        const unsubscribeItems = subscribeToAllCollections(db, (items) => {
           setMenuItems(items)
         })
         setLoading(false)
@@ -63,30 +69,31 @@ export default function AdminPage() {
     if (!db) return
 
     try {
-      await addMenuItem(db, formData)
+      const collectionName = getCollectionName(formData.category)
+      await addMenuItemToCollection(db, collectionName, formData)
       setIsAddingItem(false)
     } catch (error) {
       console.error("Error adding item:", error)
     }
   }
 
-  const handleUpdateItem = async (id: string, formData: any) => {
+  const handleUpdateItem = async (collectionName: string, id: string, formData: any) => {
     if (!db) return
 
     try {
-      await updateMenuItem(db, id, formData)
+      await updateMenuItemInCollection(db, collectionName, id, formData)
       setEditingItem(null)
     } catch (error) {
       console.error("Error updating item:", error)
     }
   }
 
-  const handleDeleteItem = async (id: string) => {
+  const handleDeleteItem = async (collectionName: string, id: string) => {
     if (!db) return
 
     if (confirm("Are you sure you want to delete this item?")) {
       try {
-        await deleteMenuItem(db, id)
+        await deleteMenuItemFromCollection(db, collectionName, id)
       } catch (error) {
         console.error("Error deleting item:", error)
       }
@@ -148,6 +155,10 @@ export default function AdminPage() {
     )
   }
 
+  const allItems = Object.entries(menuItems).flatMap(([collectionName, items]) =>
+    items.map((item) => ({ ...item, collectionName })),
+  )
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
@@ -164,7 +175,7 @@ export default function AdminPage() {
 
       <main className="container mx-auto px-6 py-8">
         <div className="flex justify-between items-center mb-8">
-          <h2 className="text-xl font-bold">Menu Items</h2>
+          <h2 className="text-xl font-bold">Menu Items ({allItems.length} total)</h2>
           <Button onClick={() => setIsAddingItem(true)}>Add New Item</Button>
         </div>
 
@@ -176,12 +187,12 @@ export default function AdminPage() {
         )}
 
         <div className="grid gap-4">
-          {menuItems.map((item) => (
+          {allItems.map((item) => (
             <Card key={item.id} className="p-4">
               {editingItem?.id === item.id ? (
                 <MenuItemForm
                   initialData={item}
-                  onSubmit={(data) => handleUpdateItem(item.id, data)}
+                  onSubmit={(data) => handleUpdateItem(item.collectionName, item.id, data)}
                   onCancel={() => setEditingItem(null)}
                 />
               ) : (
@@ -189,7 +200,9 @@ export default function AdminPage() {
                   <div>
                     <h3 className="font-bold">{item.name}</h3>
                     <p className="text-sm text-muted-foreground">{item.description}</p>
-                    <p className="text-sm mt-1">Category: {item.category}</p>
+                    <p className="text-sm mt-1">
+                      Collection: <span className="font-mono text-xs">{item.collectionName}</span>
+                    </p>
                     <p className="text-sm mt-1">
                       Status:{" "}
                       <span className={item.available !== false ? "text-green-500" : "text-red-500"}>
@@ -208,17 +221,18 @@ export default function AdminPage() {
                         className="w-20 h-20 object-cover mt-2"
                       />
                     )}
-                    {item.category === "Cervezas" && (
+                    {item.collectionName === "beers" && (
                       <>
                         <p className="text-sm mt-1">IBU: {item.ibu}</p>
                         <p className="text-sm mt-1">ABV: {item.abv}</p>
                       </>
                     )}
-                    {item.category === "Vinos" && (
+                    {item.collectionName === "wines" && (
                       <>
-                        <p className="text-sm mt-1">Wine Type: {item.wineType}</p>
-                        <p className="text-sm mt-1">Glass Price: {item.glassPrice}</p>
-                        <p className="text-sm mt-1">Bottle Price: {item.bottlePrice}</p>
+                        <p className="text-sm mt-1">Type: {item.type}</p>
+                        <p className="text-sm mt-1">Style: {item.style}</p>
+                        <p className="text-sm mt-1">Glass: ${item.price_per_glass}</p>
+                        <p className="text-sm mt-1">Bottle: ${item.price_per_bottle}</p>
                       </>
                     )}
                   </div>
@@ -228,7 +242,11 @@ export default function AdminPage() {
                       <Button onClick={() => setEditingItem(item)} size="sm" variant="outline">
                         Edit
                       </Button>
-                      <Button onClick={() => handleDeleteItem(item.id)} size="sm" variant="destructive">
+                      <Button
+                        onClick={() => handleDeleteItem(item.collectionName, item.id)}
+                        size="sm"
+                        variant="destructive"
+                      >
                         Delete
                       </Button>
                     </div>
@@ -262,37 +280,80 @@ function MenuItemForm({
     image: initialData?.image || "",
     ibu: initialData?.ibu || "",
     abv: initialData?.abv || "",
-    wineType: initialData?.wineType || "",
-    glassPrice: initialData?.glassPrice || "",
-    bottlePrice: initialData?.bottlePrice || "",
+    type: initialData?.type || "",
+    style: initialData?.style || "",
+    price_per_glass: initialData?.price_per_glass || "",
+    price_per_bottle: initialData?.price_per_bottle || "",
   })
+
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {}
+
+    if (!formData.name) newErrors.name = "Name is required"
+    if (!formData.category) newErrors.category = "Category is required"
+    if (!formData.price && formData.category !== "Vinos") newErrors.price = "Price is required"
+
+    // Category-specific validation
+    if (formData.category === "Cervezas") {
+      if (!formData.ibu) newErrors.ibu = "IBU is required for beers"
+      if (!formData.abv) newErrors.abv = "ABV is required for beers"
+    }
+
+    if (formData.category === "Vinos") {
+      if (!formData.type) newErrors.type = "Wine type is required"
+      if (!formData.style) newErrors.style = "Wine style is required"
+      if (!formData.price_per_glass) newErrors.price_per_glass = "Glass price is required"
+      if (!formData.price_per_bottle) newErrors.price_per_bottle = "Bottle price is required"
+    }
+
+    if (formData.category === "Pizzas" && !formData.description) {
+      newErrors.description = "Ingredients are required for pizzas"
+    }
+
+    if (formData.category === "Tragos" && !formData.description) {
+      newErrors.description = "Ingredients are required for cocktails"
+    }
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (!validateForm()) {
+      return
+    }
+
     onSubmit(formData)
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <label className="text-sm font-medium">Name</label>
-        <Input value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
+        <label className="text-sm font-medium">Name *</label>
+        <Input
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          className={errors.name ? "border-red-500" : ""}
+        />
+        {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
       </div>
       <div>
         <label className="text-sm font-medium">Description</label>
         <Textarea
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+          className={errors.description ? "border-red-500" : ""}
         />
+        {errors.description && <p className="text-xs text-red-500 mt-1">{errors.description}</p>}
       </div>
       <div>
-        <label className="text-sm font-medium">Price</label>
-        <Input value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} required />
-      </div>
-      <div>
-        <label className="text-sm font-medium">Category</label>
+        <label className="text-sm font-medium">Category *</label>
         <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-          <SelectTrigger>
+          <SelectTrigger className={errors.category ? "border-red-500" : ""}>
             <SelectValue placeholder="Select a category" />
           </SelectTrigger>
           <SelectContent>
@@ -303,7 +364,96 @@ function MenuItemForm({
             ))}
           </SelectContent>
         </Select>
+        {errors.category && <p className="text-xs text-red-500 mt-1">{errors.category}</p>}
       </div>
+
+      {formData.category === "Cervezas" && (
+        <>
+          <div>
+            <label className="text-sm font-medium">IBU *</label>
+            <Input
+              type="number"
+              value={formData.ibu}
+              onChange={(e) => setFormData({ ...formData, ibu: e.target.value })}
+              className={errors.ibu ? "border-red-500" : ""}
+            />
+            {errors.ibu && <p className="text-xs text-red-500 mt-1">{errors.ibu}</p>}
+          </div>
+          <div>
+            <label className="text-sm font-medium">ABV *</label>
+            <Input
+              type="number"
+              step="0.1"
+              value={formData.abv}
+              onChange={(e) => setFormData({ ...formData, abv: e.target.value })}
+              className={errors.abv ? "border-red-500" : ""}
+            />
+            {errors.abv && <p className="text-xs text-red-500 mt-1">{errors.abv}</p>}
+          </div>
+        </>
+      )}
+
+      {formData.category === "Vinos" && (
+        <>
+          <div>
+            <label className="text-sm font-medium">Wine Type *</label>
+            <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
+              <SelectTrigger className={errors.type ? "border-red-500" : ""}>
+                <SelectValue placeholder="Select wine type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="red">Red</SelectItem>
+                <SelectItem value="white">White</SelectItem>
+              </SelectContent>
+            </Select>
+            {errors.type && <p className="text-xs text-red-500 mt-1">{errors.type}</p>}
+          </div>
+          <div>
+            <label className="text-sm font-medium">Style *</label>
+            <Input
+              value={formData.style}
+              onChange={(e) => setFormData({ ...formData, style: e.target.value })}
+              placeholder="e.g., Red Blend, Chardonnay"
+              className={errors.style ? "border-red-500" : ""}
+            />
+            {errors.style && <p className="text-xs text-red-500 mt-1">{errors.style}</p>}
+          </div>
+          <div>
+            <label className="text-sm font-medium">Price per Glass *</label>
+            <Input
+              type="number"
+              value={formData.price_per_glass}
+              onChange={(e) => setFormData({ ...formData, price_per_glass: e.target.value })}
+              className={errors.price_per_glass ? "border-red-500" : ""}
+            />
+            {errors.price_per_glass && <p className="text-xs text-red-500 mt-1">{errors.price_per_glass}</p>}
+          </div>
+          <div>
+            <label className="text-sm font-medium">Price per Bottle *</label>
+            <Input
+              type="number"
+              value={formData.price_per_bottle}
+              onChange={(e) => setFormData({ ...formData, price_per_bottle: e.target.value })}
+              className={errors.price_per_bottle ? "border-red-500" : ""}
+            />
+            {errors.price_per_bottle && <p className="text-xs text-red-500 mt-1">{errors.price_per_bottle}</p>}
+          </div>
+        </>
+      )}
+
+      {formData.category !== "Vinos" && (
+        <div>
+          <label className="text-sm font-medium">Price *</label>
+          <Input
+            value={formData.price}
+            onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+            placeholder="e.g., $5000.-"
+            className={errors.price ? "border-red-500" : ""}
+          />
+          {errors.price && <p className="text-xs text-red-500 mt-1">{errors.price}</p>}
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <input
           type="checkbox"
@@ -323,48 +473,6 @@ function MenuItemForm({
         <label className="text-sm font-medium">Image URL (optional)</label>
         <Input value={formData.image} onChange={(e) => setFormData({ ...formData, image: e.target.value })} />
       </div>
-      {formData.category === "Cervezas" && (
-        <>
-          <div>
-            <label className="text-sm font-medium">IBU (optional)</label>
-            <Input value={formData.ibu} onChange={(e) => setFormData({ ...formData, ibu: e.target.value })} />
-          </div>
-          <div>
-            <label className="text-sm font-medium">ABV (optional)</label>
-            <Input value={formData.abv} onChange={(e) => setFormData({ ...formData, abv: e.target.value })} />
-          </div>
-        </>
-      )}
-      {formData.category === "Vinos" && (
-        <>
-          <div>
-            <label className="text-sm font-medium">Wine Type</label>
-            <Select value={formData.wineType} onValueChange={(value) => setFormData({ ...formData, wineType: value })}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select wine type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="red">Red</SelectItem>
-                <SelectItem value="white">White</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className="text-sm font-medium">Glass Price (optional)</label>
-            <Input
-              value={formData.glassPrice}
-              onChange={(e) => setFormData({ ...formData, glassPrice: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="text-sm font-medium">Bottle Price (optional)</label>
-            <Input
-              value={formData.bottlePrice}
-              onChange={(e) => setFormData({ ...formData, bottlePrice: e.target.value })}
-            />
-          </div>
-        </>
-      )}
       <div className="flex gap-2">
         <Button type="submit">Save</Button>
         <Button type="button" onClick={onCancel} variant="outline">
