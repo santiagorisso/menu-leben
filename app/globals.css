@@ -1,16 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
 
 @custom-variant dark (&:is(.dark *));
-
-/* Font definitions */
-@font-face {
-  font-family: "Knockout";
-  src: url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
-  font-weight: 400 900;
-  font-style: normal;
-}
 
 /* PDF-exact color scheme - dark background with orange accents */
 :root {
@@ -132,31 +123,5 @@
   }
   body {
     @apply bg-background text-foreground;
-  }
-}
-
-@layer utilities {
-  .font-knockout {
-    font-family: "Inter", sans-serif;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-  }
-
-  .font-helvetica {
-    font-family: "Helvetica", "Arial", sans-serif;
-    font-weight: 400;
-  }
-
-  .menu-title {
-    font-family: "Inter", sans-serif;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    @apply text-3xl font-bold mb-8 text-center mt-10;
-  }
-
-  .menu-description {
-    font-family: "Helvetica", "Arial", sans-serif;
-    font-weight: 400;
-    @apply text-sm text-muted-foreground;
   }
 }
